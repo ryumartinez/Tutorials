@@ -121,7 +121,7 @@ NuevaAmericana/
 
 ### Step 4: Implementation (The Code Flow)
 
-Students should use a terminal editor (like `nano`, `vim`, or `micro`) to create the following files. This flow follows a request from the bottom (Domain) to the top (API).
+Students should use a terminal editor (like `nano`, `vim`, or `micro`) to create the following files. This flow follows a request from the bottom (**Domain**) to the top (**API**).
 
 #### 4.1 The Domain Entity
 
@@ -154,7 +154,67 @@ public interface IProductRepository
 
 ```
 
-#### 4.3 The Request DTO
+#### 4.3 The Database Context (New)
+
+**File:** `NuevaAmericana.Infrastructure/Persistence/AppDbContext.cs`
+
+This class manages the connection to the database and maps our `Product` entity to a table.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using NuevaAmericana.Domain.Entities;
+
+namespace NuevaAmericana.Infrastructure.Persistence;
+
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    public DbSet<Product> Products => Set<Product>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Product>().HasIndex(p => p.Sku).IsUnique();
+        base.OnModelCreating(modelBuilder);
+    }
+}
+
+```
+
+#### 4.4 The Repository Implementation (New)
+
+**File:** `NuevaAmericana.Infrastructure/Persistence/Repositories/SqlProductRepository.cs`
+
+This is the concrete class that uses the `AppDbContext` to perform actual database operations.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using NuevaAmericana.Domain.Entities;
+using NuevaAmericana.Infrastructure.Interfaces;
+
+namespace NuevaAmericana.Infrastructure.Persistence.Repositories;
+
+public class SqlProductRepository : IProductRepository
+{
+    private readonly AppDbContext _context;
+
+    public SqlProductRepository(AppDbContext context) => _context = context;
+
+    public async Task AddAsync(Product product)
+    {
+        await _context.Products.AddAsync(product);
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<bool> ExistsBySkuAsync(string sku)
+    {
+        return await _context.Products.AnyAsync(p => p.Sku == sku);
+    }
+}
+
+```
+
+#### 4.5 The Request DTO
 
 **File:** `NuevaAmericana.Services/DTOs/ProductCreateRequest.cs`
 
@@ -164,7 +224,7 @@ public record ProductCreateRequest(string Name, string Sku, decimal Price);
 
 ```
 
-#### 4.4 The Business Rule Interface
+#### 4.6 The Business Rule Interface
 
 **File:** `NuevaAmericana.Services/Rules/IProductRule.cs`
 
@@ -179,7 +239,7 @@ public interface IProductRule
 
 ```
 
-#### 4.5 A Concrete Business Rule
+#### 4.7 A Concrete Business Rule
 
 **File:** `NuevaAmericana.Services/Rules/ProductRules/SkuUniqueRule.cs`
 
@@ -198,7 +258,7 @@ public class SkuUniqueRule : IProductRule
 
 ```
 
-#### 4.6 The Rules Engine (Orchestrator)
+#### 4.8 The Rules Engine (Orchestrator)
 
 **File:** `NuevaAmericana.Services/Rules/ProductRulesEngine.cs`
 
@@ -221,7 +281,7 @@ public class ProductRulesEngine
 
 ```
 
-#### 4.7 The Mapping Extension
+#### 4.9 The Mapping Extension
 
 **File:** `NuevaAmericana.Services/Mappings/ProductMappingExtensions.cs`
 
@@ -241,28 +301,57 @@ public static class ProductMappingExtensions
 
 ```
 
-#### 4.8 The Service Layer
+#### 4.10 The Service Interface (New)
+
+**File:** `NuevaAmericana.Services/Interfaces/IProductService.cs`
+
+This interface defines the contract for the business logic layer, allowing the API to remain decoupled from the concrete implementation.
+
+```csharp
+using NuevaAmericana.Services.DTOs;
+
+namespace NuevaAmericana.Services.Interfaces;
+
+public interface IProductService
+{
+    Task CreateProductAsync(ProductCreateRequest request);
+}
+
+```
+
+#### 4.11 The Service Layer Implementation
 
 **File:** `NuevaAmericana.Services/ProductService.cs`
+
+This class implements `IProductService` and orchestrates the business rules, mapping, and persistence.
 
 ```csharp
 using NuevaAmericana.Infrastructure.Interfaces;
 using NuevaAmericana.Services.DTOs;
 using NuevaAmericana.Services.Rules;
 using NuevaAmericana.Services.Mappings;
+using NuevaAmericana.Services.Interfaces;
+
 namespace NuevaAmericana.Services;
+
 public class ProductService : IProductService
 {
     private readonly IProductRepository _repo;
     private readonly ProductRulesEngine _rulesEngine;
+
     public ProductService(IProductRepository repo, ProductRulesEngine engine)
     {
-        _repo = repo; _rulesEngine = engine;
+        _repo = repo;
+        _rulesEngine = engine;
     }
+
     public async Task CreateProductAsync(ProductCreateRequest request)
     {
         var errors = await _rulesEngine.RunAllAsync(request);
-        if (errors.Any()) throw new Exception(string.Join(", ", errors));
+
+        if (errors.Any())
+            throw new Exception(string.Join(", ", errors));
+
         var entity = request.ToEntity();
         await _repo.AddAsync(entity);
     }
@@ -270,21 +359,27 @@ public class ProductService : IProductService
 
 ```
 
-#### 4.9 The Controller
+#### 4.12 The Controller
 
 **File:** `NuevaAmericana.API/Controllers/ProductsController.cs`
+
+The controller now injects the `IProductService` interface.
 
 ```csharp
 using Microsoft.AspNetCore.Mvc;
 using NuevaAmericana.Services.Interfaces;
 using NuevaAmericana.Services.DTOs;
+
 namespace NuevaAmericana.API.Controllers;
+
 [ApiController]
 [Route("api/[controller]")]
 public class ProductsController : ControllerBase
 {
     private readonly IProductService _service;
+
     public ProductsController(IProductService service) => _service = service;
+
     [HttpPost]
     public async Task<IActionResult> Create(ProductCreateRequest request)
     {
@@ -295,16 +390,11 @@ public class ProductsController : ControllerBase
 
 ```
 
-Once all files from Step 4 are created using the terminal editor, the final structure should look like a professional enterprise application.
+---
 
-**Terminal Command:**
+### Updated Final Structure
 
-```bash
-tree /f
-
-```
-
-**Expected Output:**
+With these additions, the student's file tree should now look like this:
 
 ```text
 NuevaAmericana/
@@ -315,6 +405,7 @@ NuevaAmericana/
 │   ├── Interfaces/
 │   │   └── IProductRepository.cs
 │   └── Persistence/
+│       ├── AppDbContext.cs
 │       └── Repositories/
 │           └── SqlProductRepository.cs
 ├── NuevaAmericana.Services/
@@ -331,15 +422,97 @@ NuevaAmericana/
 │   │       └── SkuUniqueRule.cs
 │   └── ProductService.cs
 └── NuevaAmericana.API/
-    ├── Controllers/
-    │   └── ProductsController.cs
-    └── Program.cs
+    └── Controllers/
+        └── ProductsController.cs
+
+```
+---
+
+To wire everything together, the student needs to configure the **Dependency Injection (DI)** container in the `Program.cs` file. This is where the application learns how to resolve interfaces (like `IProductService`) into concrete classes (like `ProductService`).
+
+---
+
+### Step 5: Configure Dependency Injection and Database
+
+**File:** `NuevaAmericana.API/Program.cs`
+
+Open the existing `Program.cs` in the API project and replace its contents with the following code. This configuration connects the layers and sets up an **In-Memory database** for quick testing.
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using NuevaAmericana.Infrastructure.Interfaces;
+using NuevaAmericana.Infrastructure.Persistence;
+using NuevaAmericana.Infrastructure.Persistence.Repositories;
+using NuevaAmericana.Services;
+using NuevaAmericana.Services.Interfaces;
+using NuevaAmericana.Services.Rules;
+using NuevaAmericana.Services.Rules.ProductRules;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Add Infrastructure: Database Context (Using In-Memory for testing)
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseInMemoryDatabase("NuevaAmericanaDb"));
+
+// 2. Add Infrastructure: Repositories
+builder.Services.AddScoped<IProductRepository, SqlProductRepository>();
+
+// 3. Add Services: Business Rules
+// Note: We register all IProductRule implementations so the Engine can inject them as a list
+builder.Services.AddScoped<IProductRule, SkuUniqueRule>();
+builder.Services.AddScoped<ProductRulesEngine>();
+
+// 4. Add Services: Application Logic
+builder.Services.AddScoped<IProductService, ProductService>();
+
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
 
 ```
 
 ---
 
-### Step 5: Visual Map of Responsibilities (For the Student)
+### Step 6: Install Required Packages
+
+Because we are using **Entity Framework Core** and the **In-Memory provider**, the student must run these commands in the terminal to add the necessary libraries to the Infrastructure and API projects:
+
+```bash
+# Add EF Core to Infrastructure
+dotnet add NuevaAmericana.Infrastructure/NuevaAmericana.Infrastructure.csproj package Microsoft.EntityFrameworkCore
+
+# Add In-Memory Provider to API (for the Program.cs configuration)
+dotnet add NuevaAmericana.API/NuevaAmericana.API.csproj package Microsoft.EntityFrameworkCore.InMemory
+
+```
+
+---
+
+### Summary of the "Glue" Logic
+
+| Registration Type | Description |
+| --- | --- |
+| **`AddDbContext`** | Enables the `AppDbContext` to be injected into repositories. |
+| **`AddScoped`** | Creates a new instance of the service per HTTP request (standard for web APIs). |
+| **IEnumerable Injection** | By registering multiple `IProductRule` types, the `ProductRulesEngine` automatically receives all of them in its constructor: `IEnumerable<IProductRule> rules`. |
+
+**Would you like me to provide a `curl` command or a PowerShell script so the student can test the API from the terminal once it's running?**
+
+### Step 7: Visual Map of Responsibilities (For the Student)
 
 | Layer | File | Primary Responsibility |
 | --- | --- | --- |
@@ -352,7 +525,7 @@ NuevaAmericana/
 
 ---
 
-### Step 6: Final Build and Run
+### Step 8: Final Build and Run
 
 Teach the student to verify their work via the CLI:
 
